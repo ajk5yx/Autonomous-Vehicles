@@ -10,6 +10,7 @@ kd = 0.0 #TODO
 ki = 0.0 #TODO
 servo_offset = 0.0	# zero correction offset in case servo is misaligned and has a bias in turning.
 prev_error = 0.0
+angle = 0.0
 
  
 # This code can input desired velocity from the user.
@@ -22,15 +23,15 @@ prev_error = 0.0
 vel_input = 0.0	#TODO
 
 # Publisher for moving the car. 
-# TODO: Use the coorect topic /car_x/offboard/command.
-command_pub = rospy.Publisher('/car_9/offboard/command', AckermannDrive, queue_size = 1)
+# TODO: Use the correct topic /car_x/offboard/command.
+command_pub = rospy.Publisher('/car_4/offboard/command', AckermannDrive, queue_size = 1)
 
 def control(data):
 	global prev_error
 	global vel_input
 	global kp
 	global kd
-	global angle = 0.0
+	global angle
 
 	print("PID Control Node is Listening to error")
 	
@@ -39,6 +40,15 @@ def control(data):
 	
 	# 1. Scale the error
 	# 2. Apply the PID equation on error to compute steering
+
+	V_theta = (kp*data.error) + (kd*(prev_error - data.error))
+	angle = angle - V_theta
+	prev_error = data.error
+
+	if angle > 100:
+		angle = 100
+	elif angle < -100:
+		angle = -100
 	
 	# An empty AckermannDrive message is created. You will populate the steering_angle and the speed fields.
 	command = AckermannDrive()
@@ -53,14 +63,14 @@ def control(data):
 	command_pub.publish(command)
 
 if __name__ == '__main__':
-	global kp
-	global kd
-	global ki
-	global vel_input
-	kp = input("Enter Kp Value: ")
-	kd = input("Enter Kd Value: ")
-	ki = input("Enter Ki Value: ")
-	vel_input = input("Enter desired velocity: ")
+	# global kp
+	# global kd
+	# global ki
+	# global vel_input
+	kp = input("Enter Kp Value: ") # good option is 14.0 to start
+	kd = input("Enter Kd Value: ") # good option is 0.9 to start
+	ki = input("Enter Ki Value: ") # good option is 0.0
+	vel_input = input("Enter desired velocity: ") # start with 15.0
 	rospy.init_node('pid_controller', anonymous=True)
 	rospy.Subscriber("error", pid_input, control)
 	rospy.spin()
