@@ -7,8 +7,6 @@ from ackermann_msgs.msg import AckermannDrive
 vel_input = 0.0
 command_pub = rospy.Publisher('/car_4/offboard/command', AckermannDrive, queue_size = 1)
 
-car_width = 0.0 #TODO: measure the cars radius (in meters)
-theta = 0
 
 # Good range for LIDAR (to ensure forward readings) is 150-600 (i.e. range_min = 150, range_max = 600)
 
