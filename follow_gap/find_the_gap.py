@@ -6,12 +6,12 @@ from ackermann_msgs.msg import AckermannDrive
 
 
 command_pub = rospy.Publisher('/car_4/offboard/command', AckermannDrive, queue_size = 1)
-
+vel_input = 0.0
 
 # Good range for LIDAR (to ensure forward readings) is 175-600 (i.e. range_min = 175, range_max = 600)
 
 def filterReadings(data):
-	
+	global vel_input
 	lidar_readings = [0 for q in range(426)]
 	discrepencies = []							#will contain a tuple of tuples with the interiror tuples being each measurement in a discrepency
 												#and it's corresponding index in the array
@@ -32,7 +32,7 @@ def filterReadings(data):
 	for j in range(len(lidar_readings)):
 		if j+1 < len(lidar_readings):
 			# the is not range_min is mainly accounting for nan measurements from the LIDAR, trying to reduce random LIDAR errors
-			if abs(lidar_readings[j] - lidar_readings[j+1]) > 0.2 and (lidar_readings[j] != data.range_min) and (lidar_readings[j+1] != data.range_min):
+			if abs(lidar_readings[j] - lidar_readings[j+1]) > 0.1 and (lidar_readings[j] != data.range_min) and (lidar_readings[j+1] != data.range_min):
 				discrepencies.append(((j, lidar_readings[j]), (j+1, lidar_readings[j+1])))
 	
 	#print statement used for debugging
@@ -41,55 +41,67 @@ def filterReadings(data):
 	#this implements the disparity extender algorithm, stretching the closer measurement
 	# of the two measurements in the discrepency by approximately half the width
 	# of the car in the direction of the larger measurement(i.e. creating a safety bubble)			
+	#print(discrepencies)
 	closest_discrepency = ()
 	for m in range(len(discrepencies)):
 		if m == 0:
 			closest_discrepency = discrepencies[0]
 		elif (discrepencies[m][0][1] or discrepencies[m][1][1]) < (closest_discrepency[0][1] or closest_discrepency[1][1]):
 			closest_discrepency = discrepencies[m]
-		
+	#print(closest_discrepency)
+	vel_input = 10 * min(closest_discrepency[0][1], closest_discrepency[1][1])
+	if vel_input < 7:
+		vel_input = 7
+	if vel_input > 25:
+		vel_input = 25
 
-	distance_to_handle_bubbles = min(closest_discrepency[0][1], closest_discrepency[1][1]) + 0.75
+	if(min(closest_discrepency[0][1], closest_discrepency[1][1]) + 0.5 < data.range_max):
+		distance_to_handle_bubbles = min(closest_discrepency[0][1], closest_discrepency[1][1]) + 0.5
+	else:
+		distance_to_handle_bubbles = data.range_max
+
 	ones_we_care_about = []
 	for n in range(len(discrepencies)):
-		if (discrepencies[n][0][1] or discrepencies[n][1][1]) < distance_to_handle_bubbles:
+		if (discrepencies[n][0][1] < distance_to_handle_bubbles) or (discrepencies[n][1][1] < distance_to_handle_bubbles):
 			ones_we_care_about.append(discrepencies[n])
 
-	# print(ones_we_care_about)
+	print(ones_we_care_about)
 
-	#THIS IS THE PART THAT NEEDS TO BE TWEAKED; EVERYTHING ELSE SHOULD BE FINE
+	
 	for o in range(len(ones_we_care_about)):
 		if ones_we_care_about[o][0][1] < ones_we_care_about[o][1][1]:
-			# angle = math.atan(0.2/ones_we_care_about[o][0][1])
-			# indices_to_move_over = int(angle/data.angle_increment) + 20
-
-			#THIS IF STATEMENT IS PROBABLY WHAT NEEDS TWEAKING
-			if ones_we_care_about[0][0] > 175:	# 350 (center of LIDAR ranges array - half width of car) - 175 (amount that LIDAR readings is offset by)
-				indices_to_move_over = (ones_we_care_about[0][0] - 175) + 20
+			if ones_we_care_about[o][0][0] > 175:	# 350 (center of LIDAR ranges array - half width of car) - 175 (amount that LIDAR readings is offset by)
+				if ones_we_care_about[o][0][0] >= 225:
+					indices_to_move_over = (ones_we_care_about[o][0][0] - 225) + 50
+					#indices_to_move_over = int(((425 - ones_we_care_about[o][0][0])/3) + 10)	
+				else:
+					indices_to_move_over = (ones_we_care_about[o][0][0]-175) + 20
+					
 			else:
-				indices_to_move_over = 20 #saftey bubble just in case (in this state, the car should already be clear of the obstacle)
-			
-			for l in range(ones_we_care_about[o][0][0]-indices_to_move_over, ones_we_care_about[o][0][0]+indices_to_move_over+1):
-				print(l)
+				indices_to_move_over = 40 #saftey bubble just in case (in this state, the car should already be clear of the obstacle)
+
+			for l in range(ones_we_care_about[o][0][0], ones_we_care_about[o][0][0]+indices_to_move_over+1):
+				#print(l)
 				if l < 0:
 					l = 0
 				if l > len(lidar_readings) - 1:
 					l = len(lidar_readings) - 1
 				lidar_readings[l] = 0.0
+
 		elif ones_we_care_about[o][1][1] < ones_we_care_about[o][0][1]:
-			# angle = math.atan(0.2/ones_we_care_about[o][1][1])
-			# indices_to_move_over = int(angle/data.angle_increment) + 20
-
-			# indices_to_move_over = 10*(data.range_max-ones_we_care_about[o][0][1]) + 50
-
-			#THIS IF STATEMENT IS PROBABLY WHAT NEEDS TWEAKING
-			if ones_we_care_about[1][0] < 275:		# 450 (center of lidar ranges + half width of car) - 175 (offset of lidar_readings)
-				indices_to_move_over = (275 - ones_we_care_about[1][0]) + 20
+			if ones_we_care_about[o][1][0] < 275:		# 450 (center of lidar ranges + half width of car) - 175 (offset of lidar_readings)
+				if ones_we_care_about[o][1][0] <= 225:
+					indices_to_move_over = (225 - ones_we_care_about[o][1][0]) + 50
+					#indices_to_move_over = int(((225 - (ones_we_care_about[o][1][0])))/3) + 20)
+				# elif ones_we_care_about[o][1][0] < 100:
+				# 	indices_to_move_over = 150
+				else:
+					indices_to_move_over = (275 - ones_we_care_about[o][1][0]) + 20
 			else:
-				indices_to_move_over = 20 #saftey bubble just in case (in this state, the car should already be clear of the obstacle)
+				indices_to_move_over = 40 #saftey bubble just in case (in this state, the car should already be clear of the obstacle)
 
-			for l in range(ones_we_care_about[o][0][0]-indices_to_move_over, ones_we_care_about[o][0][0]+indices_to_move_over+1):
-				print(l)
+			for l in range(ones_we_care_about[o][0][0]-indices_to_move_over, ones_we_care_about[o][0][0]+1):
+				#print(l)
 				if l < 0:
 					l = 0
 				if l > len(lidar_readings) - 1:
@@ -99,7 +111,7 @@ def filterReadings(data):
 	return	lidar_readings
 
 def gap_finder(data):
-	
+	global vel_input
 	filtered_data = filterReadings(data)
 	max_value = 0.0				#how far away the farthest measurement in filtered_data is (used for dynamic velocity)
 	max_index = 0				#index in filtered_data at which the farthest away measurement is taken
@@ -135,7 +147,6 @@ def gap_finder(data):
 		angle = -100
 
 	#this adjusts the velocity (dynamically) based on how far away the obstacle/wall we're driving towards is
-	vel_input = 6.0*max_value
 	
 	# if(vel_input < 15.0):
 	# 	vel_input = 15.0
